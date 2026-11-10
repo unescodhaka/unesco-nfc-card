@@ -1,0 +1,45 @@
+rules_version = '2';
+
+// ============================================================
+//  UNESCO Dhaka NFC Card — Firestore নিরাপত্তা নিয়ম
+//  এই পুরো লেখাটি Firebase Console → Firestore Database → Rules-এ পেস্ট করে Publish করুন।
+//
+//  ⚠️ নিচের তালিকায় অ্যাডমিনদের ইমেইল বসান (ছোট হাতের অক্ষরে)।
+//     নতুন অ্যাডমিন যোগ করতে কমা দিয়ে আরেকটি ইমেইল যোগ করে আবার Publish করুন।
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email in [
+          'admin-email@example.com'
+        ];
+    }
+
+    // অফিসের তথ্য: সবাই দেখতে পারবে, শুধু অ্যাডমিন বদলাতে পারবে
+    match /settings/{doc} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // স্টাফ প্রোফাইল: শুধু সক্রিয় কার্ড সবাই দেখতে পারবে; নিষ্ক্রিয় কার্ডের তথ্য শুধু অ্যাডমিন দেখবে
+    match /staff/{id} {
+      allow read: if resource.data.active == true || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // স্ক্যান গণনা: যে কেউ শুধু ১ করে বাড়াতে পারবে; দেখতে ও মুছতে পারবে শুধু অ্যাডমিন
+    match /scans/{id} {
+      allow read, delete: if isAdmin();
+      allow create: if exists(/databases/$(database)/documents/staff/$(id))
+                    && request.resource.data.keys().hasOnly(['n', 'last'])
+                    && request.resource.data.n == 1
+                    && request.resource.data.last == request.time;
+      allow update: if request.resource.data.keys().hasOnly(['n', 'last'])
+                    && request.resource.data.n == resource.data.n + 1
+                    && request.resource.data.last == request.time;
+    }
+  }
+}
