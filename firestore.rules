@@ -4,8 +4,9 @@ rules_version = '2';
 //  UNESCO Dhaka NFC Card — Firestore নিরাপত্তা নিয়ম (সংস্করণ ২)
 //  পুরো লেখাটি Firebase Console → Firestore Database → Rules-এ পেস্ট করে Publish করুন।
 //
-//  ⚠️ নিচের তালিকায় অ্যাডমিনদের ইমেইল বসান (ছোট হাতের অক্ষরে), শুধু Firebase Console-এ।
-//     GitHub-এ আপলোড করা ফাইলে আসল ইমেইল লিখবেন না।
+//  ⚠️ নিচের তালিকায় অ্যাডমিনদের UID বসান (Firebase → Authentication → Users → "User UID" কলাম,
+//     অথবা অ্যাডমিন প্যানেল → সেটিংস-এ দেখানো UID)। শুধু Firebase Console-এ বসান, GitHub-এ নয়।
+//     স্টাফরা অনলাইন ফর্মের জন্য নিজের ইমেইলে লগইন করতে পারেন, তাই ইমেইল নয়, UID দিয়েই অ্যাডমিন চেনা হয়।
 // ============================================================
 
 service cloud.firestore {
@@ -13,8 +14,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return request.auth != null
-        && request.auth.token.email in [
-          'admin-email@example.com'
+        && request.auth.uid in [
+          'PASTE_ADMIN_UID_HERE'      // উদাহরণ: 'kX9fQ2...'  (একাধিক হলে কমা দিয়ে)
         ];
     }
 
@@ -102,6 +103,50 @@ service cloud.firestore {
         && request.resource.data.target is string && request.resource.data.target.size() <= 120
         && request.resource.data.detail is string && request.resource.data.detail.size() <= 500;
       allow update, delete: if false;
+    }
+
+    // ---------- স্টাফদের অনলাইন ফর্মের আমন্ত্রণ (৩২ অক্ষরের গোপন লিংক) ----------
+    // লিংক যার কাছে আছে সে শুধু নিজের আমন্ত্রণটি পড়তে পারে; তালিকা বা অন্য কারোটা নয়
+    match /invites/{t} {
+      allow get: if t.matches('^[a-z0-9]{32}$');
+      allow list, create, update, delete: if isAdmin();
+    }
+
+    function validDraft(d) {
+      return d.keys().hasOnly(['nameEn','nameBn','titleEn','titleBn','deptEn','deptBn','phone','whatsapp',
+                               'email','ext','linkedin','bioEn','bioBn'])
+        && d.nameEn is string && d.nameEn.size() > 0 && d.nameEn.size() <= 120
+        && d.titleEn is string && d.titleEn.size() > 0 && d.titleEn.size() <= 150
+        && optStr(d, 'nameBn', 120) && optStr(d, 'titleBn', 150) && optStr(d, 'deptEn', 120) && optStr(d, 'deptBn', 120)
+        && optStr(d, 'phone', 30) && optStr(d, 'whatsapp', 30) && optStr(d, 'email', 120) && optStr(d, 'ext', 10)
+        && optStr(d, 'bioEn', 600) && optStr(d, 'bioBn', 600) && optUrl(d, 'linkedin');
+    }
+
+    // স্টাফের জমা: শুধু একবার, মেয়াদের মধ্যে, সম্মতি ও ই-স্বাক্ষরসহ; দেখতে ও মুছতে পারে শুধু অ্যাডমিন
+    match /submissions/{t} {
+      allow read, delete: if isAdmin();
+      allow update: if false;
+      allow create: if t.matches('^[a-z0-9]{32}$')
+        && exists(/databases/$(database)/documents/invites/$(t))
+        && get(/databases/$(database)/documents/invites/$(t)).data.expires > request.time.toMillis()
+        && get(/databases/$(database)/documents/invites/$(t)).data.status in ['sent', 'returned']
+        && request.resource.data.keys().hasOnly(['staffId','data','visibility','photo','signature','consent','fullName',
+                                                 'consentVersion','submittedAt','verifiedEmail','lang'])
+        && request.resource.data.staffId == get(/databases/$(database)/documents/invites/$(t)).data.staffId
+        && request.resource.data.consent == true
+        && request.resource.data.submittedAt == request.time
+        && request.resource.data.fullName is string && request.resource.data.fullName.size() >= 3 && request.resource.data.fullName.size() <= 120
+        && request.resource.data.consentVersion is string && request.resource.data.consentVersion.size() <= 20
+        && request.resource.data.lang in ['bn', 'en']
+        && request.resource.data.visibility.keys().hasOnly(['phone','whatsapp','email','linkedin','photo'])
+        && request.resource.data.signature is string && request.resource.data.signature.size() <= 250000
+        && request.resource.data.signature.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')
+        && okPhoto(request.resource.data)
+        && validDraft(request.resource.data.data)
+        && (request.resource.data.verifiedEmail == ''
+            || (request.auth != null && request.auth.token.email_verified == true
+                && request.resource.data.verifiedEmail == request.auth.token.email
+                && request.auth.token.email == get(/databases/$(database)/documents/invites/$(t)).data.email));
     }
 
     // ---------- স্ক্যান গণনা: শুধু ১ করে বাড়ানো যায় ----------

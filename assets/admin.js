@@ -1,6 +1,6 @@
 /* UNESCO Dhaka NFC Card — admin panel (v2) */
 import { CFG, G, VERSION, configured, esc, safeUrl, safePhoto, validId, initials, rid, $, LS, THEMES, themeOf, toast, modal, closeModal,
-  confirmBox, copyText, download, ACT, prefs, toggleTheme, isDark, cardUrl, cardSvg, emblemData, S, DEF_SETTINGS, I } from './common.js';
+  confirmBox, copyText, download, ACT, prefs, toggleTheme, isDark, cardUrl, cardSvg, emblemData, siteBase, S, DEF_SETTINGS, I } from './common.js';
 
 const SAMPLE = [
  {
@@ -126,7 +126,7 @@ const SAMPLE = [
 ];
 const IDLE_MIN = 30;
 let A, FS, AU, auth, db;
-let ME, ACCESS = null, STAFF = [], PRIV = {}, SETTINGS = null, SCANS = {}, MONTHS = {}, AUDIT = null;
+let ME, ACCESS = null, STAFF = [], PRIV = {}, SETTINGS = null, SCANS = {}, MONTHS = {}, AUDIT = null, INVITES = {}, SUBS = {};
 let tab = 'staff', q = '', unsub = [], idleT = null;
 
 /* ---------- boot ---------- */
@@ -156,9 +156,11 @@ function startData() {
   unsub.push(FS.onSnapshot(C('staffPrivate'), sn => { PRIV = {}; sn.docs.forEach(d => PRIV[d.id] = d.data()); soft(); }, () => {}));
   unsub.push(FS.onSnapshot(FS.doc(db, 'settings/office'), d => { SETTINGS = d.exists() ? d.data() : {}; if (tab !== 'settings') soft(); }, () => {}));
   unsub.push(FS.onSnapshot(C('scans'), sn => { SCANS = {}; sn.docs.forEach(d => SCANS[d.id] = d.data()); if (tab === 'staff' || tab === 'report') soft(); }, () => {}));
+  unsub.push(FS.onSnapshot(C('invites'), sn => { INVITES = {}; sn.docs.forEach(d => INVITES[d.id] = d.data()); soft(); }, () => {}));
+  unsub.push(FS.onSnapshot(C('submissions'), sn => { SUBS = {}; sn.docs.forEach(d => SUBS[d.id] = d.data()); soft(); }, () => {}));
   unsub.push(FS.onSnapshot(C('scanMonths'), sn => { MONTHS = {}; sn.docs.forEach(d => MONTHS[d.id] = d.data().n || 0); if (tab === 'report') soft(); }, () => {}));
 }
-function stopData() { unsub.forEach(u => u()); unsub = []; ACCESS = null; STAFF = []; PRIV = {}; SCANS = {}; MONTHS = {}; AUDIT = null; }
+function stopData() { unsub.forEach(u => u()); unsub = []; ACCESS = null; STAFF = []; PRIV = {}; SCANS = {}; MONTHS = {}; AUDIT = null; INVITES = {}; SUBS = {}; }
 let softT = null; function soft() { clearTimeout(softT); softT = setTimeout(() => { if (!$('#mb')) render(); }, 60); }
 
 /* ---------- writes: every change is logged in the audit trail, atomically ---------- */
@@ -175,7 +177,7 @@ function fbErr(e) {
 }
 
 /* ---------- shell ---------- */
-const TABS = [['staff', '👥 স্টাফ'], ['report', '📊 রিপোর্ট'], ['history', '🕘 ইতিহাস'], ['settings', '⚙️ সেটিংস'], ['backup', '💾 ব্যাকআপ'], ['guide', '📖 গাইড']];
+const TABS = [['staff', '👥 স্টাফ'], ['review', '📝 পর্যালোচনা'], ['report', '📊 রিপোর্ট'], ['history', '🕘 ইতিহাস'], ['settings', '⚙️ সেটিংস'], ['backup', '💾 ব্যাকআপ'], ['guide', '📖 গাইড']];
 function render() {
   const app = $('#app');
   if (ME === undefined || (ME && ACCESS === null)) { app.innerHTML = `<main class="login" aria-busy="true"><img src="assets/img/logo.webp" alt="UNESCO"><p>লোড হচ্ছে…</p></main>`; return; }
@@ -189,17 +191,17 @@ function render() {
     return;
   }
   if (ACCESS === false) {
-    app.innerHTML = `<main class="login"><img src="assets/img/logo.webp" alt="UNESCO"><h1 class="h2">অনুমতি নেই</h1><p><b>${esc(ME.email)}</b> অ্যাকাউন্টটি অ্যাডমিন তালিকায় নেই। Firebase Console → Firestore → Rules-এ ইমেইলটি যোগ করে Publish করুন।</p><button class="btn out" data-act="logout">লগআউট</button></main>`;
+    app.innerHTML = `<main class="login"><img src="assets/img/logo.webp" alt="UNESCO"><h1 class="h2">অনুমতি নেই</h1><p><b>${esc(ME.email)}</b> অ্যাকাউন্টটি অ্যাডমিন তালিকায় নেই। Firebase Console → Firestore → Rules-এ অ্যাডমিন তালিকায় নিচের UID যোগ করে Publish করুন।</p><div class="inrow"><input value="${esc(ME.uid)}" readonly><button class="btn sec" data-act="copy" data-arg="${esc(ME.uid)}">কপি</button></div><button class="btn out" data-act="logout">লগআউট</button></main>`;
     return;
   }
   const empty = !STAFF.length && !(SETTINGS && SETTINGS.officeNameEn);
   app.innerHTML = `<div class="ad">
     <header class="top"><img src="assets/img/emblem.png" alt="" width="40" height="31"><div class="ttl"><b>NFC কার্ড অ্যাডমিন</b><small>${esc(ME.email)}</small></div><div class="sp"></div>
       <button data-act="theme" aria-label="থিম বদলান">${isDark() ? I.sun : I.moon}</button><a href="./" class="tbtn">হোম</a><button data-act="logout">লগআউট</button></header>
-    <nav class="tabs" role="tablist">${TABS.map(([k, v]) => `<button role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-act="tab" data-arg="${k}">${v}</button>`).join('')}</nav>
+    <nav class="tabs" role="tablist">${TABS.map(([k, v]) => `<button role="tab" aria-selected="${tab === k}" class="${tab === k ? 'on' : ''}" data-act="tab" data-arg="${k}">${v}${k === 'review' && pendingSubs().length ? ` <span class="badge">${pendingSubs().length}</span>` : ''}</button>`).join('')}</nav>
     ${empty ? `<div class="wrap" style="padding-bottom:0"><div class="panel accent"><h3>👋 স্বাগতম! ডাটাবেজ এখনো খালি</h3><p class="m">নমুনা তথ্য দিয়ে শুরু করুন, অথবা "নতুন স্টাফ" দিয়ে নিজে যোগ করুন।</p><button class="btn" id="sdb" data-act="seed">নমুনা তথ্য দিয়ে শুরু করুন</button></div></div>` : ''}
     <main class="wrap" id="aw"></main><footer class="ver">সংস্করণ ${VERSION}</footer></div>`;
-  ({ staff: aStaff, report: aReport, history: aHistory, settings: aSettings, backup: aBackup, guide: aGuide })[tab]();
+  ({ staff: aStaff, review: aReview, report: aReport, history: aHistory, settings: aSettings, backup: aBackup, guide: aGuide })[tab]();
 }
 
 /* ---------- staff list ---------- */
@@ -237,6 +239,7 @@ function aStaff() {
     <button class="btn out" data-act="printall">🖨️ সব কার্ড (PDF)</button>
     <button class="btn out" data-act="csvout">${I.download} CSV</button>
     <label class="btn out file">📥 CSV ইমপোর্ট<input type="file" accept=".csv" class="hidden" data-change="csvin"></label>
+    <button class="btn sec" data-act="invite">✉️ সম্মতির আমন্ত্রণ</button>
     <button class="btn" data-act="edit">${I.plus} নতুন স্টাফ</button></div>
   <div class="tbl"><table class="rt"><thead><tr><th>স্টাফ</th><th>বিভাগ</th><th>যোগাযোগ</th><th>কার্ড আইডি</th><th>সম্মতি</th><th>স্ক্যান</th><th>স্ট্যাটাস</th><th>অ্যাকশন</th></tr></thead><tbody>
   ${list.map(s => { const ph = safePhoto(s.photo) || safePhoto(hiddenOf(s.id).photo), p = privOf(s.id), d = daysOff(s.id); return `<tr>
@@ -244,12 +247,13 @@ function aStaff() {
     <td data-l="বিভাগ">${esc(s.deptEn)}</td>
     <td data-l="যোগাযোগ" class="sm">${esc(phoneOf(s))}<br><span class="muted">${esc(emailOf(s))}</span></td>
     <td data-l="আইডি"><code>${esc(s.id)}</code></td>
-    <td data-l="সম্মতি" class="sm">${p.consentDate ? `<span class="pill on" title="${esc(p.consentNote || '')}">✓ ${esc(p.consentDate)}</span>` : '<span class="pill off">নেই</span>'}</td>
+    <td data-l="সম্মতি" class="sm">${p.consentDate ? `<span class="pill on" title="${esc(p.consentNote || '')}">✓ ${esc(p.consentDate)}</span>` : '<span class="pill off">নেই</span>'} ${inviteChip(s.id)}</td>
     <td data-l="স্ক্যান"><b>${(SCANS[s.id] && SCANS[s.id].n) || 0}</b>${last(s) ? `<br><span class="sm muted">${last(s)}</span>` : ''}</td>
     <td data-l="স্ট্যাটাস"><span class="pill ${s.active ? 'on' : 'off'}">${s.active ? 'সক্রিয়' : 'নিষ্ক্রিয়' + (d !== null ? ` · ${d} দিন` : '')}</span></td>
     <td data-l="অ্যাকশন"><div class="ia">
       <a class="iab" href="./#/c/${esc(s.id)}" target="_blank" rel="noopener" aria-label="প্রোফাইল দেখুন" title="প্রোফাইল দেখুন">${I.eye}</a>
       <button aria-label="এডিট" title="এডিট" data-act="edit" data-arg="${esc(s.id)}">${I.edit}</button>
+      <button aria-label="সম্মতির আমন্ত্রণ" title="সম্মতির আমন্ত্রণ (ইমেইল)" data-act="invite" data-arg="${esc(s.id)}">${I.mail}</button>
       <button aria-label="লিংক কপি" title="লিংক কপি" data-act="copylink" data-arg="${esc(s.id)}">${I.link}</button>
       <button aria-label="কার্ড ও NFC" title="কার্ড ডিজাইন ও NFC" data-act="card" data-arg="${esc(s.id)}">${I.card}</button>
       <button aria-label="${s.active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন'}" title="${s.active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন'}" data-act="toggle" data-arg="${esc(s.id)}" class="${s.active ? 'ok' : 'bad'}">${I.power}</button>
@@ -266,11 +270,13 @@ const FIELDS = [
 ];
 const isHid = k => HIDABLE.some(h => h[0] === k);
 let ED = null;
-function editStaff(id) {
+function editStaff(id, subTk) {
   const s = id ? STAFF.find(x => x.id === id) : { id: rid(), active: false, order: STAFF.length + 1, theme: 'blue' };
-  const h = id ? hiddenOf(id) : {}, p = id ? privOf(id) : {};
-  const vis = k => id ? !h[k] : !NEW_HIDDEN.includes(k);
+  const sb = subTk ? SUBS[subTk] : null;
+  const h = id ? hiddenOf(id) : {}, p = sb ? { consentDate: subDate(sb), consentNote: 'অনলাইন সম্মতি · ই-স্বাক্ষর' + (sb.verifiedEmail ? ' · ইমেইল যাচাইকৃত' : '') } : id ? privOf(id) : {};
+  const vis = k => sb ? !!sb.visibility[k] : id ? !h[k] : !NEW_HIDDEN.includes(k);
   ED = merged(s); if (!id) ED.id = s.id;
+  if (sb) { Object.assign(ED, sb.data, { photo: safePhoto(sb.photo), active: true, _sub: subTk }); }
   const ph = safePhoto(ED.photo);
   const visBox = k => `<span class="vis"><input type="checkbox" id="v_${k}" ${vis(k) ? 'checked' : ''}> <span>প্রোফাইলে দেখান</span></span>`;
   modal(`<h3>${id ? 'স্টাফের তথ্য এডিট' : 'নতুন স্টাফ যোগ করুন'}</h3><p class="sub">কার্ড আইডি <code>${esc(s.id)}</code> কখনো বদলাবে না। "প্রোফাইলে দেখান" টিক তুলে দিলে সেই তথ্য শুধু অ্যাডমিনের কাছে থাকবে।</p>
@@ -314,14 +320,16 @@ async function saveStaff(mode) {
   pub.photo = safePhoto(e.photo);
   HIDABLE.forEach(([k]) => { if (!$('#v_' + k).checked && pub[k]) { hidden[k] = pub[k]; pub[k] = ''; } });
   pub.order = Number(pub.order) || STAFF.length + 1; pub.updated = FS.serverTimestamp();
-  const prev = privOf(id);
-  const priv = { hidden, consentDate: consent ? cdate : '', consentNote: consent ? cnote : '', consentBy: consent ? ((prev.consentDate === cdate && prev.consentBy) || ME.email) : '', inactiveSince: e.active ? null : (prev.inactiveSince || Date.now()) };
+  const prev = privOf(id), sb = e._sub ? SUBS[e._sub] : null;
+  const priv = { hidden, consentDate: consent ? cdate : '', consentNote: consent ? cnote : '', consentBy: consent ? (sb ? (sb.verifiedEmail || (INVITES[e._sub] || {}).email || '') : ((prev.consentDate === cdate && prev.consentBy) || ME.email)) : '', inactiveSince: e.active ? null : (prev.inactiveSince || Date.now()) };
+  if (sb && consent) { priv.consentMethod = 'online'; priv.consentSub = e._sub; } else if (prev.consentMethod && consent && prev.consentDate === cdate) { priv.consentMethod = prev.consentMethod; if (prev.consentSub) priv.consentSub = prev.consentSub; }
   const b = $('#svb'); b.disabled = true; b.textContent = 'সেভ হচ্ছে…';
   const hidList = Object.keys(hidden).map(k => HIDABLE.find(h => h[0] === k)[1]).join('/');
   try {
     await commit(mode === 'new' ? 'যোগ' : 'এডিট', e.nameEn, `${id}${hidList ? ' · লুকানো: ' + hidList : ''}${consent ? ' · সম্মতি ' + cdate : ' · সম্মতি নেই'}${e.active ? '' : ' · নিষ্ক্রিয়'}`, bt => {
       bt.set(FS.doc(db, 'staffPrivate/' + id), priv);
       bt.set(FS.doc(db, 'staff/' + id), pub);
+      if (sb) bt.update(FS.doc(db, 'invites/' + e._sub), { status: 'approved', approvedAt: Date.now() });
     });
     closeModal(); toast('সেভ হয়েছে ✓');
   } catch (err) { fbErr(err); b.disabled = false; b.textContent = 'সেভ করুন'; }
@@ -343,8 +351,8 @@ async function markOff() {
 }
 function delStaff(id) {
   const s = STAFF.find(x => x.id === id);
-  confirmBox(`<b>${esc(s.nameEn)}</b>-এর সব তথ্য (লুকানো তথ্য ও সম্মতির রেকর্ডসহ) স্থায়ীভাবে মুছে যাবে। শুধু কার্ড বন্ধ করতে চাইলে পাওয়ার বোতাম ব্যবহার করুন।`, 'মুছে ফেলুন', async () => {
-    try { await commit('মুছে ফেলা', s.nameEn, id, b => { ['staff', 'staffPrivate', 'scans'].forEach(c => b.delete(FS.doc(db, c + '/' + id))); }); toast('মুছে ফেলা হয়েছে'); } catch (e) { fbErr(e); }
+  confirmBox(`<b>${esc(s.nameEn)}</b>-এর সব তথ্য (লুকানো তথ্য, সম্মতির রেকর্ড ও ই-স্বাক্ষরসহ) স্থায়ীভাবে মুছে যাবে। শুধু কার্ড বন্ধ করতে চাইলে পাওয়ার বোতাম ব্যবহার করুন।`, 'মুছে ফেলুন', async () => {
+    try { await commit('মুছে ফেলা', s.nameEn, id, b => { ['staff', 'staffPrivate', 'scans'].forEach(c => b.delete(FS.doc(db, c + '/' + id))); Object.entries(INVITES).forEach(([tk, v]) => { if (v.staffId === id) b.delete(FS.doc(db, 'invites/' + tk)); }); Object.entries(SUBS).forEach(([tk, v]) => { if (v.staffId === id) b.delete(FS.doc(db, 'submissions/' + tk)); }); }); toast('মুছে ফেলা হয়েছে'); } catch (e) { fbErr(e); }
   });
 }
 
@@ -425,6 +433,7 @@ function aSettings() {
   <div class="mrow end"><button class="btn big" data-act="saveset">সেটিংস সেভ করুন</button></div>
   <div class="panel"><h3>🔒 নিরাপত্তা</h3><p class="m">পাসওয়ার্ড কমপক্ষে ১৪ অক্ষরের রাখুন। বদলাতে বোতাম চাপুন, ইমেইলে লিংক যাবে।</p>
     <button class="btn sec" data-act="mypw">পাসওয়ার্ড রিসেট ইমেইল পাঠান</button>
+    <p class="hint">আপনার অ্যাডমিন UID (Firestore Rules-এর অ্যাডমিন তালিকার জন্য):</p><div class="inrow"><input value="${esc(ME.uid)}" readonly><button class="btn sec" data-act="copy" data-arg="${esc(ME.uid)}">কপি</button></div>
     <p class="hint">App Check: ${CFG.recaptchaSiteKey ? '✅ চালু (config.js-এ reCAPTCHA কী আছে)' : '⚠️ বন্ধ — config.js-এ recaptchaSiteKey বসান (গাইড দেখুন)'}</p></div>`;
 }
 async function saveSet() {
@@ -531,12 +540,158 @@ function aGuide() {
     <li><b>বিকল্প:</b> NFC Tools অ্যাপ → Write → Add a record → URL → লিংক পেস্ট → Write।</li>
     <li>কার্ডটি এমন ফোনে স্ক্যান করে দেখুন যেখানে অ্যাডমিন লগইন নেই।</li>
     <li>সব ঠিক থাকলে "কার্ড লক করুন" চাপুন (অথবা NFC Tools → Other → Lock tag)। ⚠️ লক স্থায়ী।</li></ol></div>
+  <div class="panel"><h3>✉️ স্টাফদের অনলাইন সম্মতি</h3><ol class="steps">
+    <li>স্টাফ তালিকায় "✉️ সম্মতির আমন্ত্রণ" (সবাই) বা কারো পাশের ✉️ বোতাম চাপুন → "লিংক তৈরি করুন"।</li>
+    <li>পাঠান: <b>Outlook</b> (প্রতিজনের পাশে), <b>Word Mail Merge</b> ফাইল (সবাইকে একসাথে), অথবা <b>⚡ Firebase</b> (স্বয়ংক্রিয়, ফ্রি প্ল্যানে দিনে ৫টি)।</li>
+    <li>স্টাফ লিংকে তথ্য ঠিক করে, কোনটি দেখাবে বেছে নিয়ে, ই-স্বাক্ষর আপলোড করে জমা দেবেন।</li>
+    <li>"📝 পর্যালোচনা" ট্যাবে মিলিয়ে দেখে অনুমোদন, বদলে সক্রিয়, বা কারণসহ ফেরত পাঠান।</li></ol></div>
   <div class="panel"><h3>🛒 কার্ড অর্ডার</h3><ol class="steps"><li>চিপ: <b>NTAG215</b> বা <b>NTAG216</b>।</li><li>"🖨️ সব কার্ড (PDF)" বোতাম → প্রিন্ট উইন্ডোতে "Save as PDF" → প্রিন্টিং প্রতিষ্ঠানকে দিন।</li><li>কার্ড খালি (blank chip) অবস্থায় নিন।</li></ol></div>
   <div class="panel"><h3>✅ নিয়মিত কাজ</h3><ol class="steps"><li>প্রতি মাসে "ব্যাকআপ" ট্যাব থেকে ব্যাকআপ নিন।</li><li>মাসে একবার Firebase Console → Firestore → Usage দেখুন।</li><li>কেউ অফিস ছাড়লে ৩০ দিনের মধ্যে প্রোফাইল মুছে ফেলুন।</li></ol></div>`;
 }
 
+/* ---------- staff self-service invites (Outlook / Firebase email) & review ---------- */
+const INVITE_DAYS = 14;
+const token32 = () => Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => 'abcdefghijklmnopqrstuvwxyz0123456789'[b % 36]).join('');
+const consentUrl = tk => siteBase(S(SETTINGS)) + 'consent.html?t=' + tk;
+const latestInvite = id => Object.entries(INVITES).filter(([, v]) => v.staffId === id).sort((a, b) => (b[1].created || 0) - (a[1].created || 0))[0];
+const subOf = id => Object.entries(SUBS).find(([tk, v]) => v.staffId === id && INVITES[tk] && INVITES[tk].status !== 'approved');
+const fbSentToday = () => { const d = LS.get('fb_sent', {}); return d.day === todayStr() ? d.n : 0; };
+const fbSentAdd = () => LS.set('fb_sent', { day: todayStr(), n: fbSentToday() + 1 });
+const FB_DAILY = 5;
+function inviteChip(id) {
+  const s = subOf(id); if (s) return '<span class="pill info">📝 জমা পড়েছে</span>';
+  const li = latestInvite(id); if (!li) return '';
+  const v = li[1], exp = v.expires < Date.now();
+  if (v.status === 'approved') return '';
+  if (v.status === 'returned') return `<span class="pill off">↩ ফেরত</span>`;
+  return exp ? '<span class="pill off">⌛ মেয়াদ শেষ</span>' : '<span class="pill info">✉️ পাঠানো</span>';
+}
+function mailtoFor(tk, inv, extra) {
+  const url = consentUrl(tk), exp = new Date(inv.expires).toLocaleDateString('en-GB'), o = S(SETTINGS);
+  const sub = `${o.officeNameEn} digital business card — your details & consent / আপনার তথ্য ও সম্মতি`;
+  const body = `${extra ? extra + '\n\n' : ''}প্রিয় ${inv.name},\n\nঅফিসের নতুন NFC ডিজিটাল বিজনেস কার্ডের জন্য নিচের লিংকে গিয়ে আপনার তথ্য যাচাই করুন, কোন তথ্য প্রোফাইলে দেখাবে তা বেছে নিন, এবং ই-স্বাক্ষর আপলোড করে সম্মতি দিন। আপনার সম্মতি ও অ্যাডমিনের অনুমোদন ছাড়া কিছুই প্রকাশ হবে না।\n\n${url}\n\nলিংকটি শুধু আপনার জন্য, ${exp} পর্যন্ত চালু থাকবে। অনুগ্রহ করে কাউকে ফরোয়ার্ড করবেন না।\n\n---\nDear ${inv.name},\n\nPlease open the link above to check your details for the new office NFC business card, choose what is shown on your profile, and give your consent by uploading your e-signature. Nothing is published without your consent and admin approval. The link is personal and valid until ${exp}.\n\nThank you,\n${o.officeNameEn}`;
+  return `mailto:${encodeURIComponent(inv.email)}?subject=${encodeURIComponent(sub)}&body=${encodeURIComponent(body)}`;
+}
+async function createInvites(ids) {
+  const now = Date.now(), made = [];
+  await commit('আমন্ত্রণ', ids.length + ' জন', ids.join(',').slice(0, 480), b => {
+    ids.forEach(id => {
+      const s = STAFF.find(x => x.id === id), m = merged(s), h = hiddenOf(id), tk = token32();
+      Object.entries(INVITES).filter(([, v]) => v.staffId === id && v.status !== 'approved').forEach(([old]) => b.delete(FS.doc(db, 'invites/' + old)));
+      const prefill = {}; ['nameEn', 'nameBn', 'titleEn', 'titleBn', 'deptEn', 'deptBn', 'phone', 'whatsapp', 'email', 'ext', 'linkedin', 'bioEn', 'bioBn', 'photo'].forEach(k => prefill[k] = m[k] || '');
+      prefill.photo = safePhoto(prefill.photo);
+      const inv = { staffId: id, email: String(m.email || '').toLowerCase(), name: m.nameEn, prefill, visibility: { phone: !h.phone && !!s.phone, whatsapp: !h.whatsapp && !!s.whatsapp, email: !h.email, linkedin: !h.linkedin, photo: !h.photo }, created: now, expires: now + INVITE_DAYS * 86400000, status: 'sent', lang: 'bn' };
+      b.set(FS.doc(db, 'invites/' + tk), inv); made.push([tk, inv]);
+    });
+  });
+  return made;
+}
+function inviteRows(made) {
+  return made.map(([tk, inv]) => `<div class="wrow inv"><span><b>${esc(inv.name)}</b><br><small class="muted">${esc(inv.email)}</small></span><span class="ib">
+    <a class="btn sec sm" href="${esc(mailtoFor(tk, inv))}">📧 Outlook</a>
+    <button class="btn sm" data-act="fbsend" data-arg="${tk}">⚡ Firebase</button>
+    <button class="btn out sm" data-act="copy" data-arg="${esc(consentUrl(tk))}">🔗 কপি</button></span></div>`).join('');
+}
+let LAST_MADE = [];
+function inviteModal(ids) {
+  const list = ids ? STAFF.filter(s => ids.includes(s.id)) : STAFF.filter(s => !hasConsent(s.id) || !s.active);
+  const noMail = list.filter(s => !merged(s).email);
+  modal(`<h3>✉️ সম্মতির আমন্ত্রণ পাঠান</h3><p class="sub">প্রতিজন স্টাফ একটি ব্যক্তিগত লিংক পাবেন (${INVITE_DAYS} দিন চালু)। লিংকে তিনি নিজের তথ্য ঠিক করবেন, কোনটি দেখাবে বেছে নেবেন, আর ই-স্বাক্ষর আপলোড করে সম্মতি দেবেন। জমা পড়লে "📝 পর্যালোচনা" ট্যাবে আসবে।</p>
+    <div class="invlist">${list.map(s => `<label class="sw"><input type="checkbox" class="invck" value="${esc(s.id)}" ${merged(s).email ? 'checked' : 'disabled'}> ${esc(s.nameEn)} <small class="muted">${esc(merged(s).email || '— ইমেইল নেই')}</small> ${inviteChip(s.id)}</label>`).join('') || '<p class="m">সবার সম্মতি নেওয়া আছে।</p>'}</div>
+    ${noMail.length ? `<p class="hint">⚠️ ইমেইল নেই এমন স্টাফকে আগে এডিট করে ইমেইল বসান।</p>` : ''}
+    <div class="mrow"><button class="btn out" data-act="close">বাতিল</button><button class="btn" data-act="invcreate">লিংক তৈরি করুন</button></div>`, 'আমন্ত্রণ');
+}
+async function invCreate() {
+  const ids = [...document.querySelectorAll('.invck:checked')].map(x => x.value); if (!ids.length) return toast('কাউকে বেছে নিন');
+  try { LAST_MADE = await createInvites(ids); } catch (e) { return fbErr(e); }
+  const left = Math.max(0, FB_DAILY - fbSentToday());
+  modal(`<h3>✅ ${LAST_MADE.length}টি লিংক তৈরি হয়েছে — এখন পাঠান</h3>
+    <div class="sendways">
+      <div><b>📧 Outlook (প্রস্তাবিত)</b><p class="m">প্রতিজনের পাশে "Outlook" চাপুন — বাংলা ও ইংরেজিতে লেখা ইমেইল খুলবে, শুধু Send চাপবেন। সবাইকে একসাথে পাঠাতে Word Mail Merge ফাইল নিন।</p><button class="btn sec sm" data-act="mergecsv">${I.download} Word Mail Merge ফাইল (CSV)</button></div>
+      <div><b>⚡ Firebase স্বয়ংক্রিয়</b><p class="m">Firebase নিজেই ইমেইল পাঠাবে এবং স্টাফের ইমেইল যাচাই করবে (ইমেইলটি ইংরেজিতে, Firebase-এর নিজস্ব লেখায়)। ফ্রি প্ল্যানে দিনে ${FB_DAILY}টি — আজ বাকি আনুমানিক ${left}টি।</p><button class="btn sm" data-act="fball" ${left ? '' : 'disabled'}>⚡ প্রথম ${Math.min(left, LAST_MADE.length)} জনকে পাঠান</button></div>
+    </div>
+    <p class="hint">💡 দুটোই পাঠাতে পারেন: Outlook-এ ব্যাখ্যাসহ ইমেইল, আর Firebase-এ যাচাইয়ের লিংক। স্টাফ যেকোনো একটি লিংক খুললেই হবে; Firebase-এর লিংক দিয়ে খুললে ফর্মে "ইমেইল যাচাই হয়েছে" দেখাবে।</p>
+    <div class="invsend">${inviteRows(LAST_MADE)}</div>
+    <div class="mrow"><button class="btn out" data-act="close">বন্ধ</button></div>`, 'পাঠান');
+}
+async function fbSend(tk, quiet) {
+  const inv = INVITES[tk] || (LAST_MADE.find(x => x[0] === tk) || [])[1]; if (!inv) return false;
+  try {
+    await AU.sendSignInLinkToEmail(auth, inv.email, { url: consentUrl(tk), handleCodeInApp: true });
+    fbSentAdd(); FS.updateDoc(FS.doc(db, 'invites/' + tk), { fbSentAt: Date.now() }).catch(() => {});
+    if (!quiet) toast(`⚡ ${inv.name}-কে Firebase ইমেইল পাঠানো হয়েছে`); return true;
+  } catch (e) {
+    const c = String(e.code || '');
+    toast(c.includes('quota') ? `Firebase-এর আজকের ইমেইল সীমা (${FB_DAILY}টি) শেষ — Outlook দিয়ে পাঠান` : c.includes('operation-not-allowed') ? 'Firebase-এ Email link চালু নেই — গাইডের ধাপ দেখুন' : c.includes('unauthorized') ? 'ওয়েবসাইটের ঠিকানা Firebase-এর Authorized domains-এ নেই' : 'Firebase ইমেইল পাঠানো যায়নি: ' + (e.message || c));
+    return false;
+  }
+}
+async function fbAll() {
+  let ok = 0; for (const [tk] of LAST_MADE) { if (fbSentToday() >= FB_DAILY) break; if (await fbSend(tk, true)) ok++; else break; }
+  toast(`⚡ ${ok} জনকে Firebase ইমেইল পাঠানো হয়েছে${ok < LAST_MADE.length ? ' — বাকিদের Outlook দিয়ে পাঠান' : ''}`);
+}
+function mergeCsv() {
+  const cell = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [['Name', 'Email', 'Link', 'ValidUntil'].join(','), ...LAST_MADE.map(([tk, v]) => [v.name, v.email, consentUrl(tk), new Date(v.expires).toLocaleDateString('en-GB')].map(cell).join(','))];
+  download('consent_invites_mailmerge.csv', '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
+  toast('ফাইল ডাউনলোড হয়েছে — Word → Mailings → Start Mail Merge → E-mail Messages');
+}
+
+/* ---------- review tab ---------- */
+const LABELS = { nameEn: 'নাম (EN)', nameBn: 'নাম (বাং)', titleEn: 'পদবি (EN)', titleBn: 'পদবি (বাং)', deptEn: 'বিভাগ (EN)', deptBn: 'বিভাগ (বাং)', phone: 'মোবাইল', whatsapp: 'হোয়াটসঅ্যাপ', email: 'ইমেইল', ext: 'এক্সটেনশন', linkedin: 'LinkedIn', bioEn: 'পরিচিতি (EN)', bioBn: 'পরিচিতি (বাং)' };
+const pendingSubs = () => Object.entries(SUBS).filter(([tk]) => !INVITES[tk] || INVITES[tk].status !== 'approved').sort((a, b) => ((a[1].submittedAt || {}).seconds || 0) - ((b[1].submittedAt || {}).seconds || 0));
+const tsDate = x => x && x.toDate ? x.toDate() : null;
+function aReview() {
+  const list = pendingSubs();
+  $('#aw').innerHTML = `<div class="panel"><h3>📝 স্টাফদের জমা দেওয়া তথ্য ও সম্মতি</h3><p class="m">মিলিয়ে দেখে অনুমোদন করুন। অনুমোদন করলে তথ্য প্রোফাইলে যাবে, সম্মতির রেকর্ড নিজে থেকে সেভ হবে, আর কার্ড সক্রিয় হবে।</p>
+    <div class="mrow" style="margin-top:6px"><button class="btn sec" data-act="invite">✉️ নতুন আমন্ত্রণ পাঠান</button></div></div>
+  ${list.map(([tk, sb]) => { const cur = STAFF.find(x => x.id === sb.staffId); if (!cur) return ''; const m = merged(cur), d = tsDate(sb.submittedAt), np = safePhoto(sb.photo), op = safePhoto(m.photo);
+    const rows = Object.keys(LABELS).map(k => { const a = m[k] || '', b2 = sb.data[k] || '', ch = a !== b2, vk = ['phone', 'whatsapp', 'email', 'linkedin'].includes(k); if (!a && !b2) return ''; return `<tr class="${ch ? 'chg' : ''}"><td>${LABELS[k]}</td><td class="muted">${esc(a)}</td><td>${esc(b2)}</td><td>${vk ? (sb.visibility[k] ? '👁 দেখাবে' : '🔒 লুকানো') : ''}</td></tr>`; }).join('');
+    return `<div class="panel rv"><div class="rvh"><div><h3>${esc(sb.data.nameEn)}</h3><p class="m">${d ? d.toLocaleString('bn-BD') : ''} · ${sb.verifiedEmail ? `<span class="pill on">✅ ইমেইল যাচাইকৃত</span>` : `<span class="pill info">🔗 লিংকের মাধ্যমে</span>`} · কার্ড আইডি <code>${esc(sb.staffId)}</code></p></div></div>
+      <div class="tbl flat"><table><thead><tr><th>তথ্য</th><th>বর্তমান</th><th>নতুন</th><th>প্রোফাইলে</th></tr></thead><tbody>${rows}
+      <tr class="${np !== op ? 'chg' : ''}"><td>ছবি</td><td>${op ? `<img src="${op}" class="thumb" alt="">` : '—'}</td><td>${np ? `<img src="${np}" class="thumb" alt="">` : '—'}</td><td>${sb.visibility.photo ? '👁 দেখাবে' : '🔒 লুকানো'}</td></tr></tbody></table></div>
+      <div class="sigrow" style="margin-top:12px"><div class="sigbox"><img src="${safePhoto(sb.signature)}" alt="signature"></div><div class="m"><b>${esc(sb.fullName)}</b><br>সম্মতি সংস্করণ ${esc(sb.consentVersion)}${sb.verifiedEmail ? `<br>${esc(sb.verifiedEmail)}` : ''}</div></div>
+      <div class="mrow"><button class="btn red" data-act="subreturn" data-arg="${tk}">↩ ফেরত পাঠান</button><button class="btn sec" data-act="subedit" data-arg="${tk}">✏️ বদলে সক্রিয় করুন</button><button class="btn" data-act="subok" data-arg="${tk}">✓ অনুমোদন ও সক্রিয়</button></div></div>`; }).join('') || '<div class="panel"><p class="m">এখন পর্যালোচনার জন্য কিছু নেই।</p></div>'}`;
+}
+function subToStaff(tk) {
+  const sb = SUBS[tk], cur = STAFF.find(x => x.id === sb.staffId), pub = {}, hidden = {};
+  ['nameEn', 'nameBn', 'titleEn', 'titleBn', 'deptEn', 'deptBn', 'phone', 'whatsapp', 'email', 'ext', 'linkedin', 'bioEn', 'bioBn'].forEach(k => pub[k] = String(sb.data[k] || ''));
+  ['officePhone'].forEach(k => pub[k] = cur.officePhone || '');
+  pub.photo = safePhoto(sb.photo); pub.theme = cur.theme || 'blue'; pub.order = Number(cur.order) || STAFF.length; pub.active = true;
+  ['phone', 'whatsapp', 'email', 'linkedin', 'photo'].forEach(k => { if (!sb.visibility[k] && pub[k]) { hidden[k] = pub[k]; pub[k] = ''; } });
+  if (pub.linkedin && !safeUrl(pub.linkedin)) pub.linkedin = '';
+  return { pub, hidden };
+}
+const subDate = sb => { const d = tsDate(sb.submittedAt) || new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+async function subApprove(tk) {
+  const sb = SUBS[tk], inv = INVITES[tk] || {}, { pub, hidden } = subToStaff(tk); pub.updated = FS.serverTimestamp();
+  try {
+    await commit('অনলাইন সম্মতি অনুমোদন', pub.nameEn, `${sb.staffId} · ${sb.verifiedEmail ? 'ইমেইল যাচাইকৃত' : 'লিংক'} · ${sb.consentVersion}`, b => {
+      b.set(FS.doc(db, 'staffPrivate/' + sb.staffId), { hidden, consentDate: subDate(sb), consentNote: 'অনলাইন সম্মতি · ই-স্বাক্ষর' + (sb.verifiedEmail ? ' · ইমেইল যাচাইকৃত' : ''), consentBy: sb.verifiedEmail || inv.email || '', consentMethod: 'online', consentSub: tk, inactiveSince: null });
+      b.set(FS.doc(db, 'staff/' + sb.staffId), pub);
+      b.update(FS.doc(db, 'invites/' + tk), { status: 'approved', approvedAt: Date.now() });
+    });
+    toast('অনুমোদিত ✓ — কার্ড সক্রিয় হয়েছে');
+  } catch (e) { fbErr(e); }
+}
+function subReturn(tk) {
+  const sb = SUBS[tk];
+  modal(`<h3>↩ ফেরত পাঠান — ${esc(sb.data.nameEn)}</h3><p class="sub">কী ঠিক করতে হবে লিখুন। একই লিংকটি আবার ${INVITE_DAYS} দিনের জন্য চালু হবে, জমা দেওয়া তথ্য মুছে যাবে।</p>
+    <label for="rnote">কারণ</label><textarea id="rnote" rows="3" maxlength="300"></textarea>
+    <div class="mrow"><button class="btn out" data-act="close">বাতিল</button><button class="btn red" data-act="subreturnok" data-arg="${tk}">ফেরত পাঠান</button></div>`, 'ফেরত');
+}
+async function subReturnOk(tk) {
+  const note = $('#rnote').value.trim(); if (!note) return toast('কারণ লিখুন');
+  const sb = SUBS[tk], inv = Object.assign({}, INVITES[tk], { expires: Date.now() + INVITE_DAYS * 86400000, status: 'returned', returnNote: note });
+  try {
+    await commit('ফেরত', sb.data.nameEn, note.slice(0, 300), b => { b.update(FS.doc(db, 'invites/' + tk), { status: 'returned', returnNote: note, expires: inv.expires }); b.delete(FS.doc(db, 'submissions/' + tk)); });
+    modal(`<h3>ফেরত পাঠানো হয়েছে — স্টাফকে জানান</h3><div class="mrow"><a class="btn sec" href="${esc(mailtoFor(tk, inv, 'আপনার জমা দেওয়া তথ্য ফেরত পাঠানো হয়েছে। কারণ: ' + note))}">📧 Outlook-এ জানান</a><button class="btn" data-act="fbsend" data-arg="${tk}">⚡ Firebase লিংক আবার পাঠান</button><button class="btn out" data-act="close">বন্ধ</button></div>`, 'ফেরত');
+  } catch (e) { fbErr(e); }
+}
+
 /* ---------- actions ---------- */
 Object.assign(ACT, {
+  close: () => { closeModal(); soft(); },
   login: async () => {
     const em = $('#em').value.trim(), pw = $('#pw').value; if (!em || !pw) return toast('ইমেইল ও পাসওয়ার্ড দিন');
     const b = $('#lb'); b.disabled = true; b.textContent = 'অপেক্ষা করুন…';
@@ -555,6 +710,8 @@ Object.assign(ACT, {
   dlcard: async arg => { const [id, side] = arg.split('|'), s = STAFF.find(x => x.id === id); download(`Card_${side}_${s.nameEn.replace(/\W+/g, '_')}.svg`, cardSvg(s, S(SETTINGS), side, await emblemData()), 'image/svg+xml'); },
   printone: () => { document.body.classList.add('print-one'); setTimeout(() => window.print(), 50); },
   printall: () => printAll(), markoff: () => markOff(),
+  invite: id => inviteModal(id ? [id] : null), invcreate: () => invCreate(), fbsend: tk => fbSend(tk), fball: () => fbAll(), mergecsv: () => mergeCsv(),
+  subok: tk => subApprove(tk), subedit: tk => { const sb = SUBS[tk]; editStaff(sb.staffId, tk); }, subreturn: tk => subReturn(tk), subreturnok: tk => subReturnOk(tk),
   consentchk: (_, el) => { const d = $('#f_cdate'); if (el.checked && d && !d.value) d.value = todayStr(); if (!el.checked) { const a = $('#f_active'); if (a) a.checked = false; } }, nfcw: id => nfcWrite(id), nfclock: () => nfcLock(),
   saveset: () => saveSet(), seed: () => seed(), backup: () => backup(), restore: (_, el) => restore(el),
   csvout: () => exportCsv(), csvin: (_, el) => importCsv(el), reloadaudit: () => { AUDIT = null; aHistory(); }

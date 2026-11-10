@@ -1,5 +1,5 @@
 /* UNESCO Dhaka NFC Card — shared helpers (v2) */
-export const VERSION = '2.1.0';
+export const VERSION = '2.2.0';
 export const FB_V = '10.14.1';
 export const G = `https://www.gstatic.com/firebasejs/${FB_V}/`;
 // config.js: সংস্করণ ২-এর APP_CONFIG, অথবা সংস্করণ ১-এর FIREBASE_CONFIG — দুটোই চলে
@@ -39,11 +39,11 @@ export function modal(html, label) {
   closeModal(); lastFocus = document.activeElement;
   const m = document.createElement('div'); m.className = 'mb'; m.id = 'mb';
   m.innerHTML = `<div class="md" role="dialog" aria-modal="true" aria-label="${esc(label || '')}" tabindex="-1">${html}</div>`;
-  m.addEventListener('click', e => { if (e.target === m) closeModal(); });
+  m.addEventListener('click', e => { if (e.target === m) ACT.close(); });
   document.body.appendChild(m); m.querySelector('.md').focus(); return m;
 }
 export function closeModal() { const m = $('#mb'); if (m) { m.remove(); if (lastFocus && lastFocus.focus) lastFocus.focus(); } }
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#mb')) ACT.close(); });
 export function confirmBox(msg, okLabel, fn, danger = true) {
   modal(`<h3>নিশ্চিত করুন</h3><p class="sub" style="font-size:14px">${msg}</p><div class="mrow"><button class="btn out" data-act="close">বাতিল</button><button class="btn ${danger ? 'red' : ''}" id="okb">${esc(okLabel)}</button></div>`, 'confirm');
   $('#okb').onclick = () => { closeModal(); fn(); };
