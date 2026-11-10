@@ -1,11 +1,11 @@
 rules_version = '2';
 
 // ============================================================
-//  UNESCO Dhaka NFC Card — Firestore নিরাপত্তা নিয়ম
-//  এই পুরো লেখাটি Firebase Console → Firestore Database → Rules-এ পেস্ট করে Publish করুন।
+//  UNESCO Dhaka NFC Card — Firestore নিরাপত্তা নিয়ম (সংস্করণ ২)
+//  পুরো লেখাটি Firebase Console → Firestore Database → Rules-এ পেস্ট করে Publish করুন।
 //
-//  ⚠️ নিচের তালিকায় অ্যাডমিনদের ইমেইল বসান (ছোট হাতের অক্ষরে)।
-//     নতুন অ্যাডমিন যোগ করতে কমা দিয়ে আরেকটি ইমেইল যোগ করে আবার Publish করুন।
+//  ⚠️ নিচের তালিকায় অ্যাডমিনদের ইমেইল বসান (ছোট হাতের অক্ষরে), শুধু Firebase Console-এ।
+//     GitHub-এ আপলোড করা ফাইলে আসল ইমেইল লিখবেন না।
 // ============================================================
 
 service cloud.firestore {
@@ -18,28 +18,114 @@ service cloud.firestore {
         ];
     }
 
-    // অফিসের তথ্য: সবাই দেখতে পারবে, শুধু অ্যাডমিন বদলাতে পারবে
+    // ---------- সাহায্যকারী যাচাই ----------
+    function optStr(d, k, n) { return !(k in d) || (d[k] is string && d[k].size() <= n); }
+    function optUrl(d, k) {
+      return !(k in d) || d[k] == ''
+        || (d[k] is string && d[k].size() <= 400 && d[k].matches('^https://[^\\s"<>]+$'));
+    }
+    function okPhoto(d) {
+      return !('photo' in d) || d.photo == ''
+        || (d.photo is string && d.photo.size() <= 120000
+            && d.photo.matches('^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$'));
+    }
+    function thisMonth() {
+      return string(request.time.year()) + '-'
+        + (request.time.month() < 10 ? '0' : '') + string(request.time.month());
+    }
+
+    function validStaff(d) {
+      return d.keys().hasOnly(['nameEn','nameBn','titleEn','titleBn','deptEn','deptBn','phone','whatsapp',
+                               'email','ext','linkedin','officePhone','bioEn','bioBn','photo','active',
+                               'order','theme','updated'])
+        && d.nameEn is string && d.nameEn.size() > 0 && d.nameEn.size() <= 120
+        && d.titleEn is string && d.titleEn.size() > 0 && d.titleEn.size() <= 150
+        && optStr(d, 'nameBn', 120) && optStr(d, 'titleBn', 150)
+        && optStr(d, 'deptEn', 120) && optStr(d, 'deptBn', 120)
+        && optStr(d, 'phone', 30) && optStr(d, 'whatsapp', 30) && optStr(d, 'officePhone', 30)
+        && optStr(d, 'email', 120) && optStr(d, 'ext', 10)
+        && optStr(d, 'bioEn', 600) && optStr(d, 'bioBn', 600)
+        && optUrl(d, 'linkedin') && okPhoto(d)
+        && d.active is bool
+        && (!('theme' in d) || d.theme in ['blue','teal','green','orange','purple','red'])
+        && (!('order' in d) || d.order is number);
+    }
+
+    function validSettings(d) {
+      return d.keys().hasOnly(['officeNameEn','officeNameBn','taglineEn','taglineBn','addressEn','addressBn',
+                               'phone','email','website','mapUrl','baseUrl','tagline2','showDirectory',
+                               'privacyEn','privacyBn'])
+        && optStr(d, 'officeNameEn', 120) && optStr(d, 'officeNameBn', 120)
+        && optStr(d, 'taglineEn', 200) && optStr(d, 'taglineBn', 200)
+        && optStr(d, 'addressEn', 300) && optStr(d, 'addressBn', 300)
+        && optStr(d, 'phone', 30) && optStr(d, 'email', 120) && optStr(d, 'tagline2', 120)
+        && optStr(d, 'privacyEn', 1500) && optStr(d, 'privacyBn', 1500)
+        && optUrl(d, 'website') && optUrl(d, 'mapUrl') && optUrl(d, 'baseUrl')
+        && (!('showDirectory' in d) || d.showDirectory is bool);
+    }
+
+    // ---------- অফিসের তথ্য: সবাই পড়বে, অ্যাডমিন লিখবে ----------
     match /settings/{doc} {
+      allow read: if true;
+      allow write: if isAdmin() && validSettings(request.resource.data);
+    }
+
+    // ---------- স্টাফ প্রোফাইল ----------
+    // get = একজনের প্রোফাইল (শুধু সক্রিয় হলে সবাই)
+    // list = সবার তালিকা (শুধু অ্যাডমিন) → পুরো তালিকা একসাথে নামানো বন্ধ
+    match /staff/{id} {
+      allow get: if resource.data.active == true || isAdmin();
+      allow list, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && id.matches('^[a-z0-9]{6,16}$')
+        && validStaff(request.resource.data);
+    }
+
+    // ব্যক্তিগত তথ্য (লুকানো মোবাইল নম্বর): শুধু অ্যাডমিন
+    match /staffPrivate/{id} {
+      allow read, write: if isAdmin();
+    }
+
+    // হোম পেজের টিম ডিরেক্টরি (শুধু নাম ও পদবি)
+    match /directory/{doc} {
       allow read: if true;
       allow write: if isAdmin();
     }
 
-    // স্টাফ প্রোফাইল: শুধু সক্রিয় কার্ড সবাই দেখতে পারবে; নিষ্ক্রিয় কার্ডের তথ্য শুধু অ্যাডমিন দেখবে
-    match /staff/{id} {
-      allow read: if resource.data.active == true || isAdmin();
-      allow write: if isAdmin();
+    // ---------- পরিবর্তনের ইতিহাস: শুধু যোগ করা যায়, বদলানো বা মোছা যায় না ----------
+    match /audit/{id} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['at','by','action','target','detail'])
+        && request.resource.data.by == request.auth.token.email
+        && request.resource.data.at == request.time
+        && request.resource.data.action is string && request.resource.data.action.size() <= 40
+        && request.resource.data.target is string && request.resource.data.target.size() <= 120
+        && request.resource.data.detail is string && request.resource.data.detail.size() <= 500;
+      allow update, delete: if false;
     }
 
-    // স্ক্যান গণনা: যে কেউ শুধু ১ করে বাড়াতে পারবে; দেখতে ও মুছতে পারবে শুধু অ্যাডমিন
+    // ---------- স্ক্যান গণনা: শুধু ১ করে বাড়ানো যায় ----------
     match /scans/{id} {
       allow read, delete: if isAdmin();
       allow create: if exists(/databases/$(database)/documents/staff/$(id))
-                    && request.resource.data.keys().hasOnly(['n', 'last'])
-                    && request.resource.data.n == 1
-                    && request.resource.data.last == request.time;
-      allow update: if request.resource.data.keys().hasOnly(['n', 'last'])
-                    && request.resource.data.n == resource.data.n + 1
-                    && request.resource.data.last == request.time;
+        && request.resource.data.keys().hasOnly(['n','last'])
+        && request.resource.data.n == 1
+        && request.resource.data.last == request.time;
+      allow update: if request.resource.data.keys().hasOnly(['n','last'])
+        && request.resource.data.n == resource.data.n + 1
+        && request.resource.data.last == request.time;
+    }
+
+    // মাসভিত্তিক মোট স্ক্যান (শুধু চলতি মাসেরটা বাড়ানো যায়)
+    match /scanMonths/{m} {
+      allow read, delete: if isAdmin();
+      allow create: if m == thisMonth()
+        && request.resource.data.keys().hasOnly(['n'])
+        && request.resource.data.n == 1;
+      allow update: if m == thisMonth()
+        && request.resource.data.keys().hasOnly(['n'])
+        && request.resource.data.n == resource.data.n + 1;
     }
   }
 }
