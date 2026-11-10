@@ -76,21 +76,20 @@ service cloud.firestore {
     match /staff/{id} {
       allow get: if resource.data.active == true || isAdmin();
       allow list, delete: if isAdmin();
+      // সক্রিয় কার্ডের জন্য staffPrivate-এ সম্মতির তারিখ থাকা বাধ্যতামূলক
       allow create, update: if isAdmin()
         && id.matches('^[a-z0-9]{6,16}$')
-        && validStaff(request.resource.data);
+        && validStaff(request.resource.data)
+        && (request.resource.data.active == false
+            || getAfter(/databases/$(database)/documents/staffPrivate/$(id)).data.get('consentDate', '') != '');
     }
 
-    // ব্যক্তিগত তথ্য (লুকানো মোবাইল নম্বর): শুধু অ্যাডমিন
+    // ব্যক্তিগত তথ্য (লুকানো তথ্য, সম্মতির রেকর্ড, নিষ্ক্রিয় হওয়ার তারিখ): শুধু অ্যাডমিন
     match /staffPrivate/{id} {
       allow read, write: if isAdmin();
     }
 
-    // হোম পেজের টিম ডিরেক্টরি (শুধু নাম ও পদবি)
-    match /directory/{doc} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
+    // টিম ডিরেক্টরি স্থায়ীভাবে বন্ধ: /directory কেউ পড়তে বা লিখতে পারবে না
 
     // ---------- পরিবর্তনের ইতিহাস: শুধু যোগ করা যায়, বদলানো বা মোছা যায় না ----------
     match /audit/{id} {

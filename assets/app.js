@@ -84,7 +84,7 @@ function renderProfile(s, o) {
     </nav>
     <button class="save" data-act="vcf">${I.user} ${tt.save}</button>
     <section class="box" aria-label="Contact details">${rows.map(r => `<a class="row" href="${esc(r[3])}" ${ext(r[3])}><span class="ic" aria-hidden="true">${r[0]}</span><span class="tx"><small>${r[1]}</small><span>${esc(r[2])}</span></span><span class="go" aria-hidden="true">${I.chev}</span></a>`).join('')}</section>
-    <div class="two"><button class="ghost" data-act="exchange">${I.swap} ${tt.exch}</button><button class="ghost" data-act="qr">${I.qr} ${tt.myqr}</button></div>
+    <div class="two">${(s.whatsapp || s.phone || s.email) ? `<button class="ghost" data-act="exchange">${I.swap} ${tt.exch}</button>` : ''}<button class="ghost" data-act="qr" ${(s.whatsapp || s.phone || s.email) ? '' : 'style="grid-column:1/-1"'}>${I.qr} ${tt.myqr}</button></div>
     ${footer(o)}
   </main>`;
 }
@@ -112,7 +112,7 @@ Object.assign(ACT, {
   exchange: () => { const tt = t(); modal(`<h3>${tt.exch}</h3><p class="sub">${tt.exchSub}</p>
     <label for="xn">${tt.yname} *</label><input id="xn" autocomplete="name"><label for="xp">${tt.yphone}</label><input id="xp" type="tel" autocomplete="tel"><label for="xe">${tt.yemail}</label><input id="xe" type="email" autocomplete="email">
     <label for="xo">${tt.yorg}</label><input id="xo" autocomplete="organization"><label for="xm">${tt.ymsg}</label><textarea id="xm" rows="2"></textarea>
-    <div class="mrow"><button class="btn wa" data-act="sendex" data-arg="wa">${tt.sendWa}</button><button class="btn" data-act="sendex" data-arg="mail">${tt.sendMail}</button></div>`, tt.exch); },
+    <div class="mrow">${(CUR.whatsapp || CUR.phone) ? `<button class="btn wa" data-act="sendex" data-arg="wa">${tt.sendWa}</button>` : ''}${CUR.email ? `<button class="btn" data-act="sendex" data-arg="mail">${tt.sendMail}</button>` : ''}</div>`, tt.exch); },
   sendex: via => { const tt = t(), g = id => $('#' + id).value.trim().slice(0, 300);
     if (!g('xn') || (!g('xp') && !g('xe'))) return toast(tt.need);
     const body = `${tt.exText}\n\n${tt.yname}: ${g('xn')}\n${tt.yphone}: ${g('xp')}\n${tt.yemail}: ${g('xe')}\n${tt.yorg}: ${g('xo')}${g('xm') ? '\n\n' + g('xm') : ''}`;
@@ -143,9 +143,7 @@ async function route(soft) {
   } else {
     renderHome(o0, null);
     const oRaw = await fetchSettings(); const o = S(oRaw); if (my !== seq) return;
-    let list = null;
-    if (o.showDirectory) { try { const d = await F.getDoc(F.doc(db, 'directory/public')); list = d.exists() ? (d.data().list || []) : []; } catch (e) {} }
-    if (my === seq) renderHome(o, list);
+    if (my === seq) renderHome(o, null); // স্টাফ তালিকা হোম পেজে দেখানো হয় না (প্রাইভেসি)
   }
 }
 window.addEventListener('hashchange', () => { route(); window.scrollTo(0, 0); });

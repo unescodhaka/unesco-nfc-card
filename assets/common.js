@@ -1,5 +1,5 @@
 /* UNESCO Dhaka NFC Card — shared helpers (v2) */
-export const VERSION = '2.0.0';
+export const VERSION = '2.1.0';
 export const FB_V = '10.14.1';
 export const G = `https://www.gstatic.com/firebasejs/${FB_V}/`;
 // config.js: সংস্করণ ২-এর APP_CONFIG, অথবা সংস্করণ ১-এর FIREBASE_CONFIG — দুটোই চলে

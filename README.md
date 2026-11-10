@@ -43,6 +43,6 @@
 | `admin.html` + `assets/admin.js` | অ্যাডমিন প্যানেল |
 | `assets/common.js`, `assets/style.css`, `assets/qr.js` | দুই পেজের সাধারণ কোড, ডিজাইন আর QR |
 | `assets/fonts`, `assets/img` | ফন্ট, লোগো আর আইকন |
-| `config.js` | Firebase আর reCAPTCHA-র তথ্য (আপনার পুরোনোটাই থাকবে; নতুন ইনস্টলে `config.example.js` থেকে বানান) |
+| `config.js` | Firebase আর reCAPTCHA-র তথ্য |
 | `firestore.rules` | ডাটাবেজের নিরাপত্তা নিয়ম |
 | `sw.js`, `manifest.webmanifest` | অফলাইন ক্যাশ আর অ্যাপের মতো ইনস্টল |
