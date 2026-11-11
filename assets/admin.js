@@ -219,48 +219,134 @@ const phoneOf = s => s.phone || (hiddenOf(s.id).phone ? hiddenOf(s.id).phone + '
 const emailOf = s => s.email || (hiddenOf(s.id).email ? hiddenOf(s.id).email + ' 🔒' : '');
 
 /* ---------- staff list ---------- */
+/* ---------- staff stages: যোগ → আমন্ত্রণ → জমা (অপেক্ষমান) → সক্রিয় ---------- */
+let FILTER = 'all';
+function stageOf(s) {
+  if (subOf(s.id)) return 'pending';
+  if (s.active) return 'active';
+  const li = latestInvite(s.id);
+  if (li && li[1].status !== 'approved') { if (li[1].expires < Date.now()) return 'expired'; return li[1].status === 'returned' ? 'returned' : 'invited'; }
+  return hasConsent(s.id) ? 'inactive' : 'new';
+}
+const STAGES = {
+  new: ['আমন্ত্রণ বাকি', 'off'], invited: ['আমন্ত্রণ পাঠানো', 'info'], expired: ['মেয়াদ শেষ', 'off'], returned: ['ফেরত পাঠানো', 'off'],
+  pending: ['অনুমোদনের অপেক্ষায়', 'warn'], active: ['সক্রিয়', 'on'], inactive: ['নিষ্ক্রিয়', 'off']
+};
+const FILTERS = [['all', 'সব'], ['todo', 'আমন্ত্রণ বাকি'], ['invited', 'আমন্ত্রণ পাঠানো'], ['pending', 'অনুমোদনের অপেক্ষায়'], ['active', 'সক্রিয়'], ['inactive', 'নিষ্ক্রিয়']];
+const inFilter = (st, f) => f === 'all' || (f === 'todo' ? ['new', 'expired', 'returned'].includes(st) : st === f);
+function stageCell(s) {
+  const st = stageOf(s), [label, cls] = STAGES[st], d = daysOff(s.id);
+  const btn = st === 'pending' ? `<button class="btn sm" data-act="reviewone" data-arg="${esc(s.id)}">${I.eye} দেখুন ও অনুমোদন</button>`
+    : ['new', 'expired', 'returned'].includes(st) ? `<button class="btn sm sec" data-act="invite" data-arg="${esc(s.id)}">${I.mail} আমন্ত্রণ পাঠান</button>`
+    : st === 'invited' ? `<button class="btn sm out" data-act="invite" data-arg="${esc(s.id)}">${I.mail} আবার পাঠান</button>` : '';
+  return `<span class="pill ${cls}">${label}${st === 'inactive' && d !== null ? ` · ${d} দিন` : ''}</span>${btn ? `<div style="margin-top:6px">${btn}</div>` : ''}`;
+}
+
 function aStaff() {
-  const all = STAFF, act = all.filter(s => s.active).length, tot = Object.values(SCANS).reduce((a, b) => a + (b.n || 0), 0);
-  const list = all.filter(s => !q || [s.nameEn, s.nameBn, s.titleEn, s.deptEn, emailOf(s), phoneOf(s)].join(' ').toLowerCase().includes(q.toLowerCase()));
-  const overdue = all.filter(s => !s.active && daysOff(s.id) !== null && daysOff(s.id) >= RETAIN_DAYS);
-  const undated = all.filter(s => !s.active && daysOff(s.id) === null);
+  const all = STAFF, tot = Object.values(SCANS).reduce((a, b) => a + (b.n || 0), 0);
+  const counts = {}; FILTERS.forEach(([k]) => counts[k] = all.filter(s => inFilter(stageOf(s), k)).length);
+  const list = all.filter(s => inFilter(stageOf(s), FILTER) && (!q || [s.nameEn, s.nameBn, s.titleEn, s.deptEn, emailOf(s), phoneOf(s)].join(' ').toLowerCase().includes(q.toLowerCase())));
+  const overdue = all.filter(s => !s.active && hasConsent(s.id) && daysOff(s.id) !== null && daysOff(s.id) >= RETAIN_DAYS);
+  const undated = all.filter(s => !s.active && hasConsent(s.id) && daysOff(s.id) === null && stageOf(s) === 'inactive');
   const noConsent = all.filter(s => s.active && !hasConsent(s.id));
   const last = s => { const x = SCANS[s.id] && SCANS[s.id].last; return x && x.toDate ? x.toDate().toLocaleDateString('bn-BD') : ''; };
   const warn = [];
+  if (counts.pending) warn.push(`<div class="panel warnp okp"><h3>📝 ${counts.pending} জন স্টাফ তথ্য ও সম্মতি জমা দিয়েছেন — অনুমোদনের অপেক্ষায়</h3><div class="mrow" style="margin-top:8px"><button class="btn sm" data-act="filter" data-arg="pending">তালিকা দেখুন</button></div></div>`);
   if (overdue.length) warn.push(`<div class="panel warnp"><h3>🗑️ ${overdue.length} জন স্টাফের কার্ড ${RETAIN_DAYS} দিনের বেশি নিষ্ক্রিয়</h3><p class="m">প্রাইভেসি নীতি অনুযায়ী এখন তাঁদের তথ্য মুছে ফেলা উচিত।</p>${overdue.map(s => `<div class="wrow"><span><b>${esc(s.nameEn)}</b> · ${daysOff(s.id)} দিন</span><button class="btn red sm" data-act="del" data-arg="${esc(s.id)}">মুছে ফেলুন</button></div>`).join('')}</div>`);
   if (undated.length) warn.push(`<div class="panel warnp"><h3>📅 ${undated.length} জন নিষ্ক্রিয় স্টাফের নিষ্ক্রিয় হওয়ার তারিখ নেই</h3><p class="m">${undated.map(s => esc(s.nameEn)).join(', ')} — আজ থেকে ${RETAIN_DAYS} দিনের গণনা শুরু করতে বোতাম চাপুন।</p><button class="btn sec" data-act="markoff">আজ থেকে গণনা শুরু করুন</button></div>`);
-  if (noConsent.length) warn.push(`<div class="panel warnp"><h3>✍️ ${noConsent.length} জন সক্রিয় স্টাফের সম্মতির রেকর্ড নেই</h3><p class="m">${noConsent.map(s => esc(s.nameEn)).join(', ')} — ✏️ এডিট করে সম্মতির তারিখ বসান। সম্মতি ছাড়া এঁদের তথ্য আর সেভ করা যাবে না।</p></div>`);
+  if (noConsent.length) warn.push(`<div class="panel warnp"><h3>✍️ ${noConsent.length} জন সক্রিয় স্টাফের সম্মতির রেকর্ড নেই</h3><p class="m">${noConsent.map(s => esc(s.nameEn)).join(', ')} — তাঁদের সম্মতির আমন্ত্রণ পাঠান, অথবা ✏️ এডিট করে সম্মতির তারিখ বসান।</p></div>`);
   $('#aw').innerHTML = `${warn.join('')}
   <div class="stats">
-    <div class="st"><small>মোট স্টাফ</small><b>${all.length}</b></div><div class="st"><small>সক্রিয় কার্ড</small><b class="ok">${act}</b></div>
-    <div class="st"><small>নিষ্ক্রিয় কার্ড</small><b class="bad">${all.length - act}</b></div><div class="st"><small>মোট স্ক্যান</small><b class="bl">${tot}</b></div></div>
-  <div class="bar"><label class="sr" for="qbox">খুঁজুন</label><input id="qbox" type="search" placeholder="🔍 নাম, পদবি, বিভাগ দিয়ে খুঁজুন..." value="${esc(q)}" data-input="search">
+    <div class="st"><small>মোট স্টাফ</small><b>${all.length}</b></div><div class="st"><small>সক্রিয় কার্ড</small><b class="ok">${counts.active}</b></div>
+    <div class="st"><small>অনুমোদনের অপেক্ষায়</small><b class="bl">${counts.pending}</b></div><div class="st"><small>মোট স্ক্যান</small><b>${tot}</b></div></div>
+  <div class="bar"><label class="sr" for="qbox">খুঁজুন</label><input id="qbox" type="search" placeholder="🔍 নাম, পদবি, ইমেইল দিয়ে খুঁজুন..." value="${esc(q)}" data-input="search">
     <div class="sp"></div>
-    <button class="btn out" data-act="printall">🖨️ সব কার্ড (PDF)</button>
-    <button class="btn out" data-act="csvout">${I.download} CSV</button>
-    <label class="btn out file">📥 CSV ইমপোর্ট<input type="file" accept=".csv" class="hidden" data-change="csvin"></label>
-    <button class="btn sec" data-act="invite">✉️ সম্মতির আমন্ত্রণ</button>
-    <button class="btn" data-act="edit">${I.plus} নতুন স্টাফ</button></div>
-  <div class="tbl"><table class="rt"><thead><tr><th>স্টাফ</th><th>বিভাগ</th><th>যোগাযোগ</th><th>কার্ড আইডি</th><th>সম্মতি</th><th>স্ক্যান</th><th>স্ট্যাটাস</th><th>অ্যাকশন</th></tr></thead><tbody>
-  ${list.map(s => { const ph = safePhoto(s.photo) || safePhoto(hiddenOf(s.id).photo), p = privOf(s.id), d = daysOff(s.id); return `<tr>
-    <td data-l="স্টাফ"><div class="pp"><div class="a" style="--c1:${themeOf(s)[0]}">${ph ? `<img src="${ph}" alt="">` : esc(initials(s.nameEn))}</div><div><b>${esc(s.nameEn)}</b><small>${esc(s.nameBn)} · ${esc(s.titleEn)}</small></div></div></td>
-    <td data-l="বিভাগ">${esc(s.deptEn)}</td>
-    <td data-l="যোগাযোগ" class="sm">${esc(phoneOf(s))}<br><span class="muted">${esc(emailOf(s))}</span></td>
-    <td data-l="আইডি"><code>${esc(s.id)}</code></td>
-    <td data-l="সম্মতি" class="sm">${p.consentDate ? `<span class="pill on" title="${esc(p.consentNote || '')}">✓ ${esc(p.consentDate)}</span>` : '<span class="pill off">নেই</span>'} ${inviteChip(s.id)}</td>
+    <button class="btn" data-act="quickadd">${I.plus} স্টাফ যোগ করুন</button>
+    <button class="btn sec" data-act="invite">✉️ আমন্ত্রণ পাঠান</button>
+    <details class="more"><summary class="btn out">⋯ আরও</summary><div class="menu">
+      <button class="btn out" data-act="edit">📝 পুরো ফর্মে নতুন স্টাফ</button>
+      <button class="btn out" data-act="printall">🖨️ সব কার্ড (PDF)</button>
+      <button class="btn out" data-act="csvout">${I.download} CSV এক্সপোর্ট</button>
+      <label class="btn out file">📥 CSV ইমপোর্ট<input type="file" accept=".csv" class="hidden" data-change="csvin"></label></div></details></div>
+  <div class="chips" role="tablist">${FILTERS.map(([k, v]) => `<button class="chip ${FILTER === k ? 'on' : ''}" data-act="filter" data-arg="${k}">${v} <b>${counts[k]}</b></button>`).join('')}</div>
+  <div class="tbl"><table class="rt"><thead><tr><th>স্টাফ</th><th>ইমেইল / যোগাযোগ</th><th>অবস্থা</th><th>সম্মতি</th><th>স্ক্যান</th><th>অ্যাকশন</th></tr></thead><tbody>
+  ${list.map(s => { const ph = safePhoto(s.photo) || safePhoto(hiddenOf(s.id).photo), p = privOf(s.id); return `<tr>
+    <td data-l="স্টাফ"><div class="pp"><div class="a" style="--c1:${themeOf(s)[0]}">${ph ? `<img src="${ph}" alt="">` : esc(initials(s.nameEn))}</div><div><b>${esc(s.nameEn)}</b><small>${esc(s.titleEn)}${s.deptEn ? ' · ' + esc(s.deptEn) : ''}</small></div></div></td>
+    <td data-l="যোগাযোগ" class="sm">${esc(emailOf(s))}${phoneOf(s) ? `<br><span class="muted">${esc(phoneOf(s))}</span>` : ''}</td>
+    <td data-l="অবস্থা">${stageCell(s)}</td>
+    <td data-l="সম্মতি" class="sm">${p.consentDate ? `<span class="pill on" title="${esc(p.consentNote || '')}">✓ ${esc(p.consentDate)}</span>` : '<span class="muted">—</span>'}</td>
     <td data-l="স্ক্যান"><b>${(SCANS[s.id] && SCANS[s.id].n) || 0}</b>${last(s) ? `<br><span class="sm muted">${last(s)}</span>` : ''}</td>
-    <td data-l="স্ট্যাটাস"><span class="pill ${s.active ? 'on' : 'off'}">${s.active ? 'সক্রিয়' : 'নিষ্ক্রিয়' + (d !== null ? ` · ${d} দিন` : '')}</span></td>
     <td data-l="অ্যাকশন"><div class="ia">
-      <a class="iab" href="./#/c/${esc(s.id)}" target="_blank" rel="noopener" aria-label="প্রোফাইল দেখুন" title="প্রোফাইল দেখুন">${I.eye}</a>
+      ${s.active ? `<a class="iab" href="./#/c/${esc(s.id)}" target="_blank" rel="noopener" aria-label="প্রোফাইল দেখুন" title="প্রোফাইল দেখুন">${I.eye}</a>` : ''}
       <button aria-label="এডিট" title="এডিট" data-act="edit" data-arg="${esc(s.id)}">${I.edit}</button>
-      <button aria-label="সম্মতির আমন্ত্রণ" title="সম্মতির আমন্ত্রণ (ইমেইল)" data-act="invite" data-arg="${esc(s.id)}">${I.mail}</button>
-      <button aria-label="লিংক কপি" title="লিংক কপি" data-act="copylink" data-arg="${esc(s.id)}">${I.link}</button>
-      <button aria-label="কার্ড ও NFC" title="কার্ড ডিজাইন ও NFC" data-act="card" data-arg="${esc(s.id)}">${I.card}</button>
-      <button aria-label="${s.active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন'}" title="${s.active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন'}" data-act="toggle" data-arg="${esc(s.id)}" class="${s.active ? 'ok' : 'bad'}">${I.power}</button>
-      <button aria-label="মুছুন" title="মুছুন" data-act="del" data-arg="${esc(s.id)}">${I.trash}</button></div></td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">কোনো স্টাফ নেই</td></tr>'}
+      ${s.active ? `<button aria-label="লিংক কপি" title="কার্ডের লিংক কপি" data-act="copylink" data-arg="${esc(s.id)}">${I.link}</button>
+      <button aria-label="কার্ড ও NFC" title="কার্ড ডিজাইন ও NFC" data-act="card" data-arg="${esc(s.id)}">${I.card}</button>` : ''}
+      ${(s.active || hasConsent(s.id)) ? `<button aria-label="${s.active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন'}" title="${s.active ? 'নিষ্ক্রিয় করুন' : 'সক্রিয় করুন'}" data-act="toggle" data-arg="${esc(s.id)}" class="${s.active ? 'ok' : 'bad'}">${I.power}</button>` : ''}
+      <button aria-label="মুছুন" title="মুছুন" data-act="del" data-arg="${esc(s.id)}">${I.trash}</button></div></td></tr>`; }).join('') || `<tr><td colspan="6" class="empty">${all.length ? 'এই তালিকায় কেউ নেই' : 'এখনো কোনো স্টাফ নেই — "স্টাফ যোগ করুন" চাপুন'}</td></tr>`}
   </tbody></table></div>
-  <p class="hint">💡 🔒 চিহ্ন মানে তথ্যটি লুকানো — শুধু অ্যাডমিন দেখেন, প্রোফাইলে বা ডাটাবেজের পাবলিক অংশে থাকে না। সব পরিবর্তন "ইতিহাস" ট্যাবে রেকর্ড হয়।</p>`;
+  <p class="hint">💡 ধাপ: <b>স্টাফ যোগ করুন</b> (নাম, পদবি, ইমেইল) → <b>আমন্ত্রণ পাঠান</b> → স্টাফ নিজে তথ্য পূরণ করে ই-স্বাক্ষরসহ জমা দেন → এখানে <b>📝 অনুমোদনের অপেক্ষায়</b> দেখাবে → অনুমোদন করলে কার্ড সক্রিয়।</p>`;
 }
+
+/* ---------- quick add: শুধু নাম, পদবি, ইমেইল ---------- */
+let QA_MODE = 'one';
+function quickAdd(mode) {
+  QA_MODE = mode || QA_MODE;
+  modal(`<h3>স্টাফ যোগ করুন</h3><p class="sub">শুধু নাম, পদবি ও ইমেইল দিন। বাকি তথ্য, ছবি ও সম্মতি স্টাফ নিজে আমন্ত্রণ লিংক থেকে দেবেন।</p>
+    <div class="chips" style="margin:0 0 12px"><button class="chip ${QA_MODE === 'one' ? 'on' : ''}" data-act="qamode" data-arg="one">একজন</button><button class="chip ${QA_MODE === 'many' ? 'on' : ''}" data-act="qamode" data-arg="many">একসাথে অনেকজন (Excel থেকে)</button></div>
+    ${QA_MODE === 'one' ? `<div class="grid2"><div><label for="qa_n">নাম (English) *</label><input id="qa_n" maxlength="120" autocomplete="off"></div><div><label for="qa_t">পদবি (English) *</label><input id="qa_t" maxlength="150" autocomplete="off"></div>
+      <div class="full"><label for="qa_e">অফিস ইমেইল *</label><input id="qa_e" type="email" maxlength="120" autocomplete="off"></div></div>`
+    : `<label for="qa_list">Excel-এ তিনটি কলাম (নাম, পদবি, ইমেইল) সিলেক্ট করে কপি করুন, তারপর এখানে পেস্ট করুন</label>
+      <textarea id="qa_list" rows="8" placeholder="Ayesha Rahman&#9;Programme Officer&#9;a.rahman@unesco.org&#10;Tanvir Hasan&#9;Finance Assistant&#9;t.hasan@unesco.org" data-input="qaprev"></textarea><p class="hint" id="qa_prev">প্রতি লাইনে একজন। কমা দিয়েও লেখা যাবে: নাম, পদবি, ইমেইল</p>`}
+    <label class="sw"><input type="checkbox" id="qa_inv" checked> যোগ করার পরই আমন্ত্রণ পাঠান</label>
+    <div class="mrow"><button class="btn out" data-act="close">বাতিল</button><button class="btn" id="qab" data-act="qasave">যোগ করুন</button></div>`, 'স্টাফ যোগ');
+  const f = $(QA_MODE === 'one' ? '#qa_n' : '#qa_list'); if (f) f.focus();
+}
+const okMail = e => /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(e);
+const existingEmails = () => new Set(STAFF.map(s => String(merged(s).email || '').toLowerCase()).filter(Boolean));
+function parseList(txt) {
+  const have = existingEmails(), seen = new Set(), ok = [], bad = [], dup = [];
+  txt.split(/\r?\n/).map(l => l.trim()).filter(Boolean).forEach(l => {
+    const c = (l.includes('\t') ? l.split('\t') : l.split(',')).map(x => x.trim());
+    const [n, t, e] = [c[0] || '', c[1] || '', (c[2] || '').toLowerCase()];
+    if (/^(name|নাম)$/i.test(n)) return;
+    if (!n || !t || !okMail(e)) return bad.push(l);
+    if (have.has(e) || seen.has(e)) return dup.push(e);
+    seen.add(e); ok.push([n.slice(0, 120), t.slice(0, 150), e.slice(0, 120)]);
+  });
+  return { ok, bad, dup };
+}
+async function qaSave() {
+  let rows;
+  if (QA_MODE === 'one') {
+    const n = $('#qa_n').value.trim(), t = $('#qa_t').value.trim(), e = $('#qa_e').value.trim().toLowerCase();
+    if (!n || !t || !e) return toast('নাম, পদবি ও ইমেইল তিনটিই দিন');
+    if (!okMail(e)) return toast('ইমেইল সঠিক নয়');
+    if (existingEmails().has(e)) return toast('এই ইমেইলে আগেই একজন স্টাফ আছেন');
+    rows = [[n, t, e]];
+  } else {
+    const r = parseList($('#qa_list').value); if (!r.ok.length) return toast('কোনো বৈধ সারি পাওয়া যায়নি');
+    if (r.bad.length || r.dup.length) toast(`${r.bad.length ? r.bad.length + 'টি সারি অসম্পূর্ণ' : ''}${r.bad.length && r.dup.length ? ', ' : ''}${r.dup.length ? r.dup.length + 'টি ইমেইল আগে থেকেই আছে' : ''} — সেগুলো বাদ দেওয়া হলো`);
+    rows = r.ok;
+  }
+  const inv = $('#qa_inv').checked, b = $('#qab'); b.disabled = true; b.textContent = 'যোগ হচ্ছে…';
+  const made = rows.map(([n, t, e], i) => ({ id: rid(), pub: { nameEn: n, titleEn: t, email: e, active: false, order: STAFF.length + i + 1, theme: 'blue', photo: '', updated: FS.serverTimestamp() } }));
+  try {
+    for (let i = 0; i < made.length; i += 150) {
+      const ch = made.slice(i, i + 150);
+      await commit('স্টাফ যোগ', ch.length === 1 ? ch[0].pub.nameEn : ch.length + ' জন', ch.map(m => m.id).join(',').slice(0, 480), bt => ch.forEach(m => {
+        bt.set(FS.doc(db, 'staffPrivate/' + m.id), { hidden: {}, consentDate: '', inactiveSince: null });
+        bt.set(FS.doc(db, 'staff/' + m.id), m.pub);
+      }));
+    }
+    made.forEach(m => { if (!STAFF.find(x => x.id === m.id)) STAFF.push(Object.assign({ id: m.id }, m.pub)); });
+    toast(`${made.length} জন যোগ হয়েছে ✓`);
+    if (inv) { LAST_MADE = await createInvites(made.map(m => m.id)); showSend(); } else closeModal();
+  } catch (e) { fbErr(e); b.disabled = false; b.textContent = 'যোগ করুন'; }
+}
+function qaPreview() { const el = $('#qa_list'), p = $('#qa_prev'); if (!el || !p) return; const r = parseList(el.value); p.textContent = `✓ ${r.ok.length} জন যোগ হবে${r.bad.length ? ` · ✗ ${r.bad.length}টি সারি অসম্পূর্ণ` : ''}${r.dup.length ? ` · ${r.dup.length}টি ইমেইল আগে থেকেই আছে` : ''}`; }
+
+/* ---------- review a single staff from the list ---------- */
+function reviewOne(id) { const s = subOf(id); if (!s) return toast('জমা পাওয়া যায়নি'); modal(reviewCard(s[0], s[1]), 'পর্যালোচনা'); }
 
 /* ---------- edit form ---------- */
 const FIELDS = [
@@ -321,7 +407,7 @@ async function saveStaff(mode) {
   HIDABLE.forEach(([k]) => { if (!$('#v_' + k).checked && pub[k]) { hidden[k] = pub[k]; pub[k] = ''; } });
   pub.order = Number(pub.order) || STAFF.length + 1; pub.updated = FS.serverTimestamp();
   const prev = privOf(id), sb = e._sub ? SUBS[e._sub] : null;
-  const priv = { hidden, consentDate: consent ? cdate : '', consentNote: consent ? cnote : '', consentBy: consent ? (sb ? (sb.verifiedEmail || (INVITES[e._sub] || {}).email || '') : ((prev.consentDate === cdate && prev.consentBy) || ME.email)) : '', inactiveSince: e.active ? null : (prev.inactiveSince || Date.now()) };
+  const priv = { hidden, consentDate: consent ? cdate : '', consentNote: consent ? cnote : '', consentBy: consent ? (sb ? (sb.verifiedEmail || (INVITES[e._sub] || {}).email || '') : ((prev.consentDate === cdate && prev.consentBy) || ME.email)) : '', inactiveSince: e.active ? null : (prev.inactiveSince || ((STAFF.find(x => x.id === id) || {}).active ? Date.now() : null)) };
   if (sb && consent) { priv.consentMethod = 'online'; priv.consentSub = e._sub; } else if (prev.consentMethod && consent && prev.consentDate === cdate) { priv.consentMethod = prev.consentMethod; if (prev.consentSub) priv.consentSub = prev.consentSub; }
   const b = $('#svb'); b.disabled = true; b.textContent = 'সেভ হচ্ছে…';
   const hidList = Object.keys(hidden).map(k => HIDABLE.find(h => h[0] === k)[1]).join('/');
@@ -593,17 +679,25 @@ function inviteRows(made) {
     <button class="btn out sm" data-act="copy" data-arg="${esc(consentUrl(tk))}">🔗 কপি</button></span></div>`).join('');
 }
 let LAST_MADE = [];
-function inviteModal(ids) {
-  const list = ids ? STAFF.filter(s => ids.includes(s.id)) : STAFF.filter(s => !hasConsent(s.id) || !s.active);
-  const noMail = list.filter(s => !merged(s).email);
-  modal(`<h3>✉️ সম্মতির আমন্ত্রণ পাঠান</h3><p class="sub">প্রতিজন স্টাফ একটি ব্যক্তিগত লিংক পাবেন (${INVITE_DAYS} দিন চালু)। লিংকে তিনি নিজের তথ্য ঠিক করবেন, কোনটি দেখাবে বেছে নেবেন, আর ই-স্বাক্ষর আপলোড করে সম্মতি দেবেন। জমা পড়লে "📝 পর্যালোচনা" ট্যাবে আসবে।</p>
-    <div class="invlist">${list.map(s => `<label class="sw"><input type="checkbox" class="invck" value="${esc(s.id)}" ${merged(s).email ? 'checked' : 'disabled'}> ${esc(s.nameEn)} <small class="muted">${esc(merged(s).email || '— ইমেইল নেই')}</small> ${inviteChip(s.id)}</label>`).join('') || '<p class="m">সবার সম্মতি নেওয়া আছে।</p>'}</div>
-    ${noMail.length ? `<p class="hint">⚠️ ইমেইল নেই এমন স্টাফকে আগে এডিট করে ইমেইল বসান।</p>` : ''}
-    <div class="mrow"><button class="btn out" data-act="close">বাতিল</button><button class="btn" data-act="invcreate">লিংক তৈরি করুন</button></div>`, 'আমন্ত্রণ');
+function inviteModal() {
+  const list = STAFF.filter(s => merged(s).email && !['active', 'pending'].includes(stageOf(s)));
+  const pre = s => ['new', 'expired', 'returned'].includes(stageOf(s));
+  const noMail = STAFF.filter(s => !merged(s).email);
+  modal(`<h3>✉️ আমন্ত্রণ পাঠান</h3><p class="sub">যাঁদের আমন্ত্রণ যায়নি তাঁরা আগে থেকেই বাছাই করা আছেন। প্রতিজন একটি ব্যক্তিগত লিংক পাবেন (${INVITE_DAYS} দিন চালু)।</p>
+    <div class="invlist">${list.map(s => `<label class="sw"><input type="checkbox" class="invck" value="${esc(s.id)}" ${pre(s) ? 'checked' : ''}> ${esc(s.nameEn)} <small class="muted">${esc(merged(s).email)}</small> <span class="pill ${STAGES[stageOf(s)][1]}">${STAGES[stageOf(s)][0]}</span></label>`).join('') || '<p class="m">আমন্ত্রণ পাঠানোর মতো কেউ নেই।</p>'}</div>
+    ${noMail.length ? `<p class="hint">⚠️ ${noMail.length} জনের ইমেইল নেই — এডিট করে ইমেইল বসান।</p>` : ''}
+    <div class="mrow"><button class="btn out" data-act="close">বাতিল</button><button class="btn" data-act="invcreate">লিংক তৈরি করে পাঠান</button></div>`, 'আমন্ত্রণ');
+}
+async function inviteOne(id) {
+  if (!merged(STAFF.find(x => x.id === id)).email) { toast('এই স্টাফের ইমেইল নেই — আগে এডিট করে ইমেইল বসান'); return editStaff(id); }
+  try { LAST_MADE = await createInvites([id]); showSend(); } catch (e) { fbErr(e); }
 }
 async function invCreate() {
   const ids = [...document.querySelectorAll('.invck:checked')].map(x => x.value); if (!ids.length) return toast('কাউকে বেছে নিন');
   try { LAST_MADE = await createInvites(ids); } catch (e) { return fbErr(e); }
+  showSend();
+}
+function showSend() {
   const left = Math.max(0, FB_DAILY - fbSentToday());
   modal(`<h3>✅ ${LAST_MADE.length}টি লিংক তৈরি হয়েছে — এখন পাঠান</h3>
     <div class="sendways">
@@ -641,17 +735,18 @@ function mergeCsv() {
 const LABELS = { nameEn: 'নাম (EN)', nameBn: 'নাম (বাং)', titleEn: 'পদবি (EN)', titleBn: 'পদবি (বাং)', deptEn: 'বিভাগ (EN)', deptBn: 'বিভাগ (বাং)', phone: 'মোবাইল', whatsapp: 'হোয়াটসঅ্যাপ', email: 'ইমেইল', ext: 'এক্সটেনশন', linkedin: 'LinkedIn', bioEn: 'পরিচিতি (EN)', bioBn: 'পরিচিতি (বাং)' };
 const pendingSubs = () => Object.entries(SUBS).filter(([tk]) => !INVITES[tk] || INVITES[tk].status !== 'approved').sort((a, b) => ((a[1].submittedAt || {}).seconds || 0) - ((b[1].submittedAt || {}).seconds || 0));
 const tsDate = x => x && x.toDate ? x.toDate() : null;
-function aReview() {
-  const list = pendingSubs();
-  $('#aw').innerHTML = `<div class="panel"><h3>📝 স্টাফদের জমা দেওয়া তথ্য ও সম্মতি</h3><p class="m">মিলিয়ে দেখে অনুমোদন করুন। অনুমোদন করলে তথ্য প্রোফাইলে যাবে, সম্মতির রেকর্ড নিজে থেকে সেভ হবে, আর কার্ড সক্রিয় হবে।</p>
-    <div class="mrow" style="margin-top:6px"><button class="btn sec" data-act="invite">✉️ নতুন আমন্ত্রণ পাঠান</button></div></div>
-  ${list.map(([tk, sb]) => { const cur = STAFF.find(x => x.id === sb.staffId); if (!cur) return ''; const m = merged(cur), d = tsDate(sb.submittedAt), np = safePhoto(sb.photo), op = safePhoto(m.photo);
+function reviewCard(tk, sb) { const cur = STAFF.find(x => x.id === sb.staffId); if (!cur) return ''; const m = merged(cur), d = tsDate(sb.submittedAt), np = safePhoto(sb.photo), op = safePhoto(m.photo);
     const rows = Object.keys(LABELS).map(k => { const a = m[k] || '', b2 = sb.data[k] || '', ch = a !== b2, vk = ['phone', 'whatsapp', 'email', 'linkedin'].includes(k); if (!a && !b2) return ''; return `<tr class="${ch ? 'chg' : ''}"><td>${LABELS[k]}</td><td class="muted">${esc(a)}</td><td>${esc(b2)}</td><td>${vk ? (sb.visibility[k] ? '👁 দেখাবে' : '🔒 লুকানো') : ''}</td></tr>`; }).join('');
     return `<div class="panel rv"><div class="rvh"><div><h3>${esc(sb.data.nameEn)}</h3><p class="m">${d ? d.toLocaleString('bn-BD') : ''} · ${sb.verifiedEmail ? `<span class="pill on">✅ ইমেইল যাচাইকৃত</span>` : `<span class="pill info">🔗 লিংকের মাধ্যমে</span>`} · কার্ড আইডি <code>${esc(sb.staffId)}</code></p></div></div>
       <div class="tbl flat"><table><thead><tr><th>তথ্য</th><th>বর্তমান</th><th>নতুন</th><th>প্রোফাইলে</th></tr></thead><tbody>${rows}
       <tr class="${np !== op ? 'chg' : ''}"><td>ছবি</td><td>${op ? `<img src="${op}" class="thumb" alt="">` : '—'}</td><td>${np ? `<img src="${np}" class="thumb" alt="">` : '—'}</td><td>${sb.visibility.photo ? '👁 দেখাবে' : '🔒 লুকানো'}</td></tr></tbody></table></div>
       <div class="sigrow" style="margin-top:12px"><div class="sigbox"><img src="${safePhoto(sb.signature)}" alt="signature"></div><div class="m"><b>${esc(sb.fullName)}</b><br>সম্মতি সংস্করণ ${esc(sb.consentVersion)}${sb.verifiedEmail ? `<br>${esc(sb.verifiedEmail)}` : ''}</div></div>
-      <div class="mrow"><button class="btn red" data-act="subreturn" data-arg="${tk}">↩ ফেরত পাঠান</button><button class="btn sec" data-act="subedit" data-arg="${tk}">✏️ বদলে সক্রিয় করুন</button><button class="btn" data-act="subok" data-arg="${tk}">✓ অনুমোদন ও সক্রিয়</button></div></div>`; }).join('') || '<div class="panel"><p class="m">এখন পর্যালোচনার জন্য কিছু নেই।</p></div>'}`;
+      <div class="mrow"><button class="btn red" data-act="subreturn" data-arg="${tk}">↩ ফেরত পাঠান</button><button class="btn sec" data-act="subedit" data-arg="${tk}">✏️ বদলে সক্রিয় করুন</button><button class="btn" data-act="subok" data-arg="${tk}">✓ অনুমোদন ও সক্রিয়</button></div></div>`; }
+function aReview() {
+  const list = pendingSubs();
+  $('#aw').innerHTML = `<div class="panel"><h3>📝 স্টাফদের জমা দেওয়া তথ্য ও সম্মতি</h3><p class="m">মিলিয়ে দেখে অনুমোদন করুন। অনুমোদন করলে তথ্য প্রোফাইলে যাবে, সম্মতির রেকর্ড নিজে থেকে সেভ হবে, আর কার্ড সক্রিয় হবে।</p>
+    <div class="mrow" style="margin-top:6px"><button class="btn sec" data-act="invite">✉️ নতুন আমন্ত্রণ পাঠান</button></div></div>
+  ${list.map(([tk, sb]) => { return reviewCard(tk, sb); }).join('') || '<div class="panel"><p class="m">এখন পর্যালোচনার জন্য কিছু নেই।</p></div>'}`;
 }
 function subToStaff(tk) {
   const sb = SUBS[tk], cur = STAFF.find(x => x.id === sb.staffId), pub = {}, hidden = {};
@@ -671,7 +766,7 @@ async function subApprove(tk) {
       b.set(FS.doc(db, 'staff/' + sb.staffId), pub);
       b.update(FS.doc(db, 'invites/' + tk), { status: 'approved', approvedAt: Date.now() });
     });
-    toast('অনুমোদিত ✓ — কার্ড সক্রিয় হয়েছে');
+    if ($('#mb')) closeModal(); toast('অনুমোদিত ✓ — কার্ড সক্রিয় হয়েছে'); soft();
   } catch (e) { fbErr(e); }
 }
 function subReturn(tk) {
@@ -710,7 +805,8 @@ Object.assign(ACT, {
   dlcard: async arg => { const [id, side] = arg.split('|'), s = STAFF.find(x => x.id === id); download(`Card_${side}_${s.nameEn.replace(/\W+/g, '_')}.svg`, cardSvg(s, S(SETTINGS), side, await emblemData()), 'image/svg+xml'); },
   printone: () => { document.body.classList.add('print-one'); setTimeout(() => window.print(), 50); },
   printall: () => printAll(), markoff: () => markOff(),
-  invite: id => inviteModal(id ? [id] : null), invcreate: () => invCreate(), fbsend: tk => fbSend(tk), fball: () => fbAll(), mergecsv: () => mergeCsv(),
+  invite: id => id ? inviteOne(id) : inviteModal(),
+  quickadd: () => quickAdd(), qamode: m => quickAdd(m), qasave: () => qaSave(), qaprev: () => qaPreview(), filter: f => { FILTER = f; tab = 'staff'; render(); }, reviewone: id => reviewOne(id), invcreate: () => invCreate(), fbsend: tk => fbSend(tk), fball: () => fbAll(), mergecsv: () => mergeCsv(),
   subok: tk => subApprove(tk), subedit: tk => { const sb = SUBS[tk]; editStaff(sb.staffId, tk); }, subreturn: tk => subReturn(tk), subreturnok: tk => subReturnOk(tk),
   consentchk: (_, el) => { const d = $('#f_cdate'); if (el.checked && d && !d.value) d.value = todayStr(); if (!el.checked) { const a = $('#f_active'); if (a) a.checked = false; } }, nfcw: id => nfcWrite(id), nfclock: () => nfcLock(),
   saveset: () => saveSet(), seed: () => seed(), backup: () => backup(), restore: (_, el) => restore(el),

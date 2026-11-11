@@ -1,5 +1,5 @@
 /* UNESCO Dhaka NFC Card — offline cache (v2) */
-const CACHE = 'nfc-v2.2.0';
+const CACHE = 'nfc-v2.3.0';
 const ASSETS = ["./", "index.html", "assets/style.css", "assets/common.js", "assets/app.js", "assets/qr.js", "assets/img/logo.webp", "assets/img/emblem.png", "assets/img/icon-192.png", "assets/fonts/hind-siliguri-bengali-400-normal.woff2", "assets/fonts/hind-siliguri-bengali-600-normal.woff2", "assets/fonts/hind-siliguri-latin-400-normal.woff2", "assets/fonts/hind-siliguri-latin-600-normal.woff2"];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
